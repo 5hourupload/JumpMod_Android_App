@@ -2,7 +2,6 @@ package hci.jumpmod;
 
 import static android.bluetooth.BluetoothDevice.TRANSPORT_LE;
 
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.app.ActivityCompat;
@@ -25,22 +24,17 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
 import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.NumberPicker;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
-import com.google.android.material.bottomnavigation.BottomNavigationView;
-
-import java.lang.reflect.Method;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-
     private BluetoothAdapter mBluetoothAdapter;
-    private ArrayAdapter<String> mPairedDevicesArrayAdapter;
 
     BluetoothGatt mGatt;
     BluetoothGattService service;
@@ -52,11 +46,11 @@ public class MainActivity extends AppCompatActivity {
     TextView debugTextView;
     TextView voltage;
     TextView position;
-    Button calibrate;
-
+    TextView target;
     BluetoothDevice device;
-
     String reading = "voltage";
+
+    private int previousSliderPosition = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,7 +58,6 @@ public class MainActivity extends AppCompatActivity {
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
 
         setContentView(R.layout.activity_main);
-
 
         if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
                 ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
@@ -96,7 +89,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-
         debugTextView = findViewById(R.id.debug);
         voltage = findViewById(R.id.voltage);
         position = findViewById(R.id.position);
@@ -110,10 +102,8 @@ public class MainActivity extends AppCompatActivity {
 
                 commandCharacteristic.setValue(commandTextField.getText().toString());
                 mGatt.writeCharacteristic(commandCharacteristic);
-                System.out.println("Sending: " + commandTextField.getText().toString());
             }
         });
-
 
         Button rescan = findViewById(R.id.rescan);
         rescan.setOnClickListener(new View.OnClickListener() {
@@ -126,19 +116,11 @@ public class MainActivity extends AppCompatActivity {
                     mBluetoothAdapter.enable();
                 }
                 mBluetoothAdapter.startDiscovery();
+                debugTextView.setText("Discovering Devices...");
             }
         });
-        calibrate = findViewById(R.id.calibrate);
-        calibrate.setOnClickListener(new View.OnClickListener() {
-            @SuppressLint("MissingPermission")
-            @Override
-            public void onClick(View v) {
-                if (commandCharacteristic == null) return;
 
-                commandCharacteristic.setValue("c");
-                mGatt.writeCharacteristic(commandCharacteristic);
-            }
-        });
+
 
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         if(!mBluetoothAdapter.isEnabled()) {
@@ -150,38 +132,40 @@ public class MainActivity extends AppCompatActivity {
             @SuppressLint("MissingPermission")
             @Override
             public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-                gatt.discoverServices();
-                reading = "voltage";
 
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    gatt.discoverServices();
+                    reading = "voltage";
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             debugTextView.setText("Connected");
+                            rescan.setEnabled(false);
                         }
                     });
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    mGatt = device.connectGatt(getApplicationContext(), false, this, TRANSPORT_LE);
-
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             debugTextView.setText("Not Connected");
+                            rescan.setEnabled(true);
                         }
                     });
                 }
             }
 
+            @SuppressLint("MissingPermission")
             @Override
-            public void onCharacteristicRead(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic characteristic, @NonNull byte[] value, int status) {
-                super.onCharacteristicRead(gatt, characteristic, value, status);
-                System.out.println("READ!!!");
-            }
+            public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+                super.onCharacteristicWrite(gatt, characteristic, status);
+                String value = characteristic.getStringValue(0);
+                System.out.println("Characteristic Written: " + value);
 
-            @Override
-            public void onCharacteristicChanged(@NonNull BluetoothGatt gatt, @NonNull BluetoothGattCharacteristic characteristic, @NonNull byte[] value) {
-                super.onCharacteristicChanged(gatt, characteristic, value);
-                System.out.println("Changed!!!");
+                if (value.charAt(0) == 'q')
+                {
+                    commandCharacteristic.setValue("f");
+                    mGatt.writeCharacteristic(commandCharacteristic);
+                }
             }
 
             @SuppressLint("MissingPermission")
@@ -192,13 +176,11 @@ public class MainActivity extends AppCompatActivity {
                 for (BluetoothGattService s : services)
                 {
                     String uuid = s.getUuid().toString();
-                    Log.i("bluetooth", "Service Found: " + uuid);
-
                     if (uuid.equals("4fafc201-1fb5-459e-8fcc-c5c9c331914b"))
                     {
+                        Log.i("bluetooth", "Service Found: " + uuid);
                         service = s;
                         for (BluetoothGattCharacteristic mCharacteristic : s.getCharacteristics()) {
-                            Log.i("idk", "Found Characteristic: " + mCharacteristic.getUuid().toString());
                             if (mCharacteristic.getUuid().toString().equals("9c5a211f-d400-490b-9465-52f7a417d19c"))
                             {
                                 voltageCharacteristic = mCharacteristic;
@@ -225,8 +207,9 @@ public class MainActivity extends AppCompatActivity {
             }
         };
 
-
         mBluetoothAdapter.startDiscovery();
+        debugTextView.setText("Discovering Devices...");
+
         BroadcastReceiver mReceiver = new BroadcastReceiver() {
             @SuppressLint("MissingPermission")
             public void onReceive(Context context, Intent intent) {
@@ -240,18 +223,11 @@ public class MainActivity extends AppCompatActivity {
                     // Add the name and address to an array adapter to show in a ListView
                     if (foundDevice.getAddress().equals("45:99:23:A4:82:7A"))
                     {
+                        mBluetoothAdapter.cancelDiscovery(); //Allegedly slightly more reliable to cancel scan before connecting to device
+                        debugTextView.setText("Connecting...");
                         device = foundDevice;
-
                         System.out.println("FOUND:" + device.getAddress());
-//                        mBluetoothAdapter.cancelDiscovery();
-                        boolean bonded = false;
-                        try {
-                            bonded = createBond(device);
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                        if (bonded)
-                            mGatt = device.connectGatt(getApplicationContext(), false, bluetoothGattCallback,TRANSPORT_LE);
+                        mGatt = device.connectGatt(getApplicationContext(), false, bluetoothGattCallback, TRANSPORT_LE);
                     }
                 }
             }
@@ -260,12 +236,10 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
         registerReceiver(mReceiver, filter);
 
-
         Handler handler = new Handler();
         Runnable runnable = new Runnable() {
             @SuppressLint("MissingPermission")
             public void run() {
-
 
                 if (reading.equals("voltage"))
                 {
@@ -289,19 +263,53 @@ public class MainActivity extends AppCompatActivity {
                         String pChara = positionCharacteristic.getStringValue(0);
                         position.setText("Position: " + pChara);
                     }
-                    handler.postDelayed(this, 200);
+                    handler.postDelayed(this, 1000);
                 }
             }
         };
         runnable.run();
 
-    }
-    public boolean createBond(BluetoothDevice btDevice)
-            throws Exception
-    {
-        Class class1 = Class.forName("android.bluetooth.BluetoothDevice");
-        Method createBondMethod = class1.getMethod("createBond");
-        Boolean returnValue = (Boolean) createBondMethod.invoke(btDevice);
-        return returnValue.booleanValue();
+
+        Button calibrate = findViewById(R.id.calibrate);
+        calibrate.setOnClickListener(new View.OnClickListener() {
+            @SuppressLint("MissingPermission")
+            @Override
+            public void onClick(View v) {
+                if (commandCharacteristic == null) return;
+                commandCharacteristic.setValue("c");
+                mGatt.writeCharacteristic(commandCharacteristic);
+            }
+        });
+
+
+        target = findViewById(R.id.target_textview);
+
+
+        SeekBar positionSlider = findViewById(R.id.position_slider);
+        positionSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+
+            }
+
+            @SuppressLint("MissingPermission")
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                if (commandCharacteristic == null) return;
+
+                target.setText("Target: " + seekBar.getProgress());
+
+                commandCharacteristic.setValue("q,0.1,"+seekBar.getProgress());
+                mGatt.writeCharacteristic(commandCharacteristic);
+                previousSliderPosition = seekBar.getProgress();
+
+            }
+        });
+
     }
 }
