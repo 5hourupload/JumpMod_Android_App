@@ -30,6 +30,7 @@ import android.widget.NumberPicker;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import java.util.LinkedList;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
@@ -48,9 +49,9 @@ public class MainActivity extends AppCompatActivity {
     TextView position;
     TextView target;
     BluetoothDevice device;
-    String reading = "voltage";
 
-    private int previousSliderPosition = 0;
+    LinkedList<String> queue = new LinkedList<>();
+    private boolean voltageEstablished = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,44 +68,11 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.BLUETOOTH_SCAN, android.Manifest.permission.BLUETOOTH_ADMIN, android.Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION},1);
         }
 
-        NumberPicker picker = findViewById(R.id.number_picker);
-        String[] data = new String[]{"Jump Higher", "Pulled Higher", "Pulled Lower", "Land Harder", "Land Softer"};
-        picker.setMinValue(0);
-        picker.setMaxValue(data.length-1);
-        picker.setDisplayedValues(data);
-        picker.setOnValueChangedListener(new NumberPicker.OnValueChangeListener() {
-            @SuppressLint("MissingPermission")
-            @Override
-            public void onValueChange(NumberPicker picker, int oldVal, int newVal) {
-                if (commandCharacteristic == null) return;
-
-                if (newVal == 0) commandCharacteristic.setValue("x,1");
-                if (newVal == 1) commandCharacteristic.setValue("x,2");
-                if (newVal == 2) commandCharacteristic.setValue("x,3");
-                if (newVal == 3) commandCharacteristic.setValue("x,4");
-                if (newVal == 4) commandCharacteristic.setValue("x,5");
-
-                mGatt.writeCharacteristic(commandCharacteristic);
-
-            }
-        });
-
         debugTextView = findViewById(R.id.debug);
         voltage = findViewById(R.id.voltage);
         position = findViewById(R.id.position);
         TextView sendCommand = findViewById(R.id.send_command);
         EditText commandTextField = findViewById(R.id.command);
-        sendCommand.setOnClickListener(new View.OnClickListener() {
-            @SuppressLint("MissingPermission")
-            @Override
-            public void onClick(View v) {
-                if (commandCharacteristic == null) return;
-
-                commandCharacteristic.setValue(commandTextField.getText().toString());
-                mGatt.writeCharacteristic(commandCharacteristic);
-            }
-        });
-
         Button rescan = findViewById(R.id.rescan);
         rescan.setOnClickListener(new View.OnClickListener() {
             @SuppressLint("MissingPermission")
@@ -120,22 +88,19 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-
-
         mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         if(!mBluetoothAdapter.isEnabled()) {
             mBluetoothAdapter.enable();
         }
 
         BluetoothGattCallback bluetoothGattCallback = new BluetoothGattCallback() {
-
             @SuppressLint("MissingPermission")
             @Override
             public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
 
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     gatt.discoverServices();
-                    reading = "voltage";
+                    voltageEstablished = false;
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -149,6 +114,9 @@ public class MainActivity extends AppCompatActivity {
                         public void run() {
                             debugTextView.setText("Not Connected");
                             rescan.setEnabled(true);
+                            voltage.setText("Voltage:");
+                            position.setText("Position:");
+
                         }
                     });
                 }
@@ -159,13 +127,7 @@ public class MainActivity extends AppCompatActivity {
             public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
                 super.onCharacteristicWrite(gatt, characteristic, status);
                 String value = characteristic.getStringValue(0);
-                System.out.println("Characteristic Written: " + value);
-
-                if (value.charAt(0) == 'q')
-                {
-                    commandCharacteristic.setValue("f");
-                    mGatt.writeCharacteristic(commandCharacteristic);
-                }
+                System.out.println("Characteristic Written: " + value +" at " + System.currentTimeMillis());
             }
 
             @SuppressLint("MissingPermission")
@@ -214,7 +176,6 @@ public class MainActivity extends AppCompatActivity {
             @SuppressLint("MissingPermission")
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
-
                 //Finding devices
                 if (BluetoothDevice.ACTION_FOUND.equals(action))
                 {
@@ -236,80 +197,87 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
         registerReceiver(mReceiver, filter);
 
-        Handler handler = new Handler();
-        Runnable runnable = new Runnable() {
+        Handler queueHandler = new Handler();
+        Runnable queueRunnable = new Runnable() {
             @SuppressLint("MissingPermission")
             public void run() {
-
-                if (reading.equals("voltage"))
+                if (mGatt == null || commandCharacteristic == null || voltageCharacteristic == null ||  positionCharacteristic == null)
+                    queueHandler.postDelayed(this, 500);
+                else if (!queue.isEmpty())
                 {
-                    if (mGatt != null && voltageCharacteristic != null)
+                    String command = queue.pop();
+                    System.out.println("popped: " + command + " at " + System.currentTimeMillis());
+
+                    commandCharacteristic.setValue(command);
+                    mGatt.writeCharacteristic(commandCharacteristic);
+
+                    if (command.charAt(0) == 'q') queue.add("f");
+
+                    queueHandler.postDelayed(this, 150);
+                }
+                else {
+                    if (!voltageEstablished)
                     {
                         mGatt.readCharacteristic(voltageCharacteristic);
                         String vChara = voltageCharacteristic.getStringValue(0);
                         voltage.setText("Voltage: " + vChara);
-
-                        if (vChara != null)
-                            reading = "position";
+                        if (vChara != null) voltageEstablished = true;
                     }
-
-                    handler.postDelayed(this, 1000);
-                }
-                if (reading.equals("position"))
-                {
-                    if (mGatt != null && positionCharacteristic != null)
+                    else
                     {
                         mGatt.readCharacteristic(positionCharacteristic);
                         String pChara = positionCharacteristic.getStringValue(0);
                         position.setText("Position: " + pChara);
                     }
-                    handler.postDelayed(this, 1000);
+                    queueHandler.postDelayed(this, 300);
                 }
             }
         };
-        runnable.run();
-
+        queueRunnable.run();
 
         Button calibrate = findViewById(R.id.calibrate);
         calibrate.setOnClickListener(new View.OnClickListener() {
             @SuppressLint("MissingPermission")
             @Override
             public void onClick(View v) {
-                if (commandCharacteristic == null) return;
-                commandCharacteristic.setValue("c");
-                mGatt.writeCharacteristic(commandCharacteristic);
+                queue.add("c");
             }
         });
 
-
         target = findViewById(R.id.target_textview);
-
 
         SeekBar positionSlider = findViewById(R.id.position_slider);
         positionSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-
-            }
-
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {}
             @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-
-            }
-
-            @SuppressLint("MissingPermission")
+            public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
-                if (commandCharacteristic == null) return;
-
                 target.setText("Target: " + seekBar.getProgress());
-
-                commandCharacteristic.setValue("q,0.1,"+seekBar.getProgress());
-                mGatt.writeCharacteristic(commandCharacteristic);
-                previousSliderPosition = seekBar.getProgress();
-
+                queue.add("q,0.1,"+seekBar.getProgress());
             }
         });
 
+        NumberPicker picker = findViewById(R.id.number_picker);
+        String[] data = new String[]{"Jump Higher", "Pulled Higher", "Pulled Lower", "Land Harder", "Land Softer"};
+        picker.setMinValue(0);
+        picker.setMaxValue(data.length-1);
+        picker.setDisplayedValues(data);
+        picker.setOnValueChangedListener(new NumberPicker.OnValueChangeListener() {
+            @SuppressLint("MissingPermission")
+            @Override
+            public void onValueChange(NumberPicker picker, int oldVal, int newVal) {
+                queue.add("x,"+(newVal + 1));
+            }
+        });
+
+        sendCommand.setOnClickListener(new View.OnClickListener() {
+            @SuppressLint("MissingPermission")
+            @Override
+            public void onClick(View v) {
+                queue.add(commandTextField.getText().toString());
+            }
+        });
     }
 }
