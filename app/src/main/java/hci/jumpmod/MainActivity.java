@@ -202,7 +202,7 @@ public class MainActivity extends AppCompatActivity {
             @SuppressLint("MissingPermission")
             public void run() {
                 if (mGatt == null || commandCharacteristic == null || voltageCharacteristic == null ||  positionCharacteristic == null)
-                    queueHandler.postDelayed(this, 500);
+                    queueHandler.postDelayed(this, 400);
                 else if (!queue.isEmpty())
                 {
                     String command = queue.pop();
@@ -211,9 +211,7 @@ public class MainActivity extends AppCompatActivity {
                     commandCharacteristic.setValue(command);
                     mGatt.writeCharacteristic(commandCharacteristic);
 
-                    if (command.charAt(0) == 'q') queue.add("f");
-
-                    queueHandler.postDelayed(this, 150);
+                    queueHandler.postDelayed(this, 200);
                 }
                 else {
                     if (!voltageEstablished)
@@ -255,7 +253,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
                 target.setText("Target: " + seekBar.getProgress());
-                queue.add("q,0.1,"+seekBar.getProgress());
+                queue.add("i,0.1,"+seekBar.getProgress()+",");
             }
         });
 
