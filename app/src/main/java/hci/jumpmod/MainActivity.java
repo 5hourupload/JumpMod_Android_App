@@ -25,9 +25,11 @@ import android.os.Handler;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.NumberPicker;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.util.LinkedList;
@@ -275,6 +277,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 queue.add(commandTextField.getText().toString());
+            }
+        });
+
+        @SuppressLint("UseSwitchCompatOrMaterialCode") Switch arm_switch = findViewById(R.id.arm_switch);
+        arm_switch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+                if (isChecked) queue.add("b,1,");
+                else queue.add("b,0,");
             }
         });
     }
